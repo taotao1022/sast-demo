@@ -1,0 +1,58 @@
+"""
+Demo Python app — intentionally contains security issues
+so you can see SAST tools catch them in the pipeline.
+"""
+
+import subprocess
+import sqlite3
+import hashlib
+import os
+
+
+# ── ISSUE 1: SQL Injection (Bandit B608, Semgrep, CodeQL) ──────────────────
+def get_user(username: str):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+    # ❌ User input concatenated directly into SQL query
+    query = "SELECT * FROM users WHERE username = '" + username + "'"
+    cursor.execute(query)
+    return cursor.fetchall()
+
+
+# ── ISSUE 2: OS Command Injection (Bandit B602, Semgrep) ───────────────────
+def run_ping(host: str):
+    # ❌ shell=True with user-controlled input
+    result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
+    return result.stdout
+
+
+# ── ISSUE 3: Weak Hashing (Bandit B303, Semgrep) ──────────────────────────
+def hash_password(password: str) -> str:
+    # ❌ MD5 is cryptographically broken for passwords
+    return hashlib.md5(password.encode()).hexdigest()
+
+
+# ── ISSUE 4: Hardcoded Secret (Bandit B105, Semgrep) ──────────────────────
+SECRET_KEY = "super-secret-key-1234"   # ❌ hardcoded credential
+
+
+# ── ISSUE 5: Insecure Random (Bandit B311) ────────────────────────────────
+import random
+
+def generate_token() -> str:
+    # ❌ random is not cryptographically secure; use secrets.token_hex()
+    return str(random.randint(100000, 999999))
+
+
+# ── SAFE usage (for comparison) ───────────────────────────────────────────
+import secrets
+
+def generate_secure_token() -> str:
+    # ✅ secrets module is cryptographically secure
+    return secrets.token_hex(16)
+
+
+def hash_password_safe(password: str) -> str:
+    # ✅ use bcrypt or hashlib with sha256+salt in production
+    salt = secrets.token_bytes(16)
+    return hashlib.sha256(salt + password.encode()).hexdigest()

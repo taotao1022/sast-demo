@@ -1,0 +1,16 @@
+[bandit]
+# Directories/files to skip
+exclude_dirs = tests,venv,.venv,node_modules
+
+# Severity level to report: LOW, MEDIUM, HIGH
+# Set to LOW to catch everything; raise to MEDIUM/HIGH to reduce noise
+severity = LOW
+
+# Confidence level to report: LOW, MEDIUM, HIGH
+confidence = MEDIUM
+
+# Specific test IDs to skip (add here to suppress known false-positives)
+# skips = B101
+
+# Recurse into subdirectories
+recursive = true

@@ -1,0 +1,162 @@
+name: SAST Pipeline
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+  pull_request:
+    branches: ["main", "master", "develop"]
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 1. Bandit — Python-specific security linter
+  # ─────────────────────────────────────────────
+  bandit:
+    name: Bandit (Python Security)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit
+        run: pip install bandit[toml]
+
+      - name: Run Bandit
+        run: |
+          bandit -r . \
+            --configfile .bandit \
+            --format json \
+            --output bandit-report.json \
+            --exit-zero   # don't fail here; let the SARIF upload handle it
+          bandit -r . \
+            --configfile .bandit \
+            --format sarif \
+            --output bandit.sarif \
+            --exit-zero
+
+      - name: Upload Bandit SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+
+      - name: Upload Bandit JSON report as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # ─────────────────────────────────────────────
+  # 2. Semgrep — multi-rule SAST engine
+  # ─────────────────────────────────────────────
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep (Python security ruleset)
+        run: |
+          semgrep scan \
+            --config "p/python" \
+            --config "p/owasp-top-ten" \
+            --sarif \
+            --output semgrep.sarif \
+            --error    # exit non-zero if findings exist
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional; enables Semgrep Cloud dashboard
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  # ─────────────────────────────────────────────
+  # 3. CodeQL — GitHub's deep semantic analysis
+  # ─────────────────────────────────────────────
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: codeql
+
+  # ─────────────────────────────────────────────
+  # 4. pip-audit — dependency vulnerability scan
+  # ─────────────────────────────────────────────
+  pip-audit:
+    name: pip-audit (Dependency Vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Run pip-audit
+        run: |
+          pip-audit \
+            --requirement requirements.txt \
+            --format json \
+            --output pip-audit-report.json \
+            --strict        # fail if any vulnerabilities found
+        continue-on-error: true   # capture report even on failure
+
+      - name: Upload pip-audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+
+  # ─────────────────────────────────────────────
+  # 5. Summary gate — blocks merge if SAST fails
+  # ─────────────────────────────────────────────
+  sast-gate:
+    name: SAST Gate (must pass to merge)
+    needs: [bandit, semgrep, codeql, pip-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all SAST jobs
+        run: |
+          if [[ "${{ needs.bandit.result }}"    != "success" || \
+                "${{ needs.semgrep.result }}"   != "success" || \
+                "${{ needs.codeql.result }}"    != "success" || \
+                "${{ needs.pip-audit.result }}" != "success" ]]; then
+            echo "❌ One or more SAST checks failed. Review findings before merging."
+            exit 1
+          fi
+          echo "✅ All SAST checks passed."
