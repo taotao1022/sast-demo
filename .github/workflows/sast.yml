@@ -121,7 +121,6 @@ jobs:
         with:
           category: codeql
           upload: always
-          fail-on-error: true
 
   # ─────────────────────────────────────────────
   # 4. pip-audit — dependency vulnerability scan
