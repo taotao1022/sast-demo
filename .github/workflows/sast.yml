@@ -106,7 +106,12 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: python
-          queries: security-and-quality
+          queries: security-extended
+          config: |
+            query-filters:
+              - include:
+                  kind: problem
+                  precision: medium+
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
@@ -115,6 +120,8 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: codeql
+          upload: always
+          fail-on-error: true
 
   # ─────────────────────────────────────────────
   # 4. pip-audit — dependency vulnerability scan
