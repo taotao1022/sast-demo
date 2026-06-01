@@ -6,3 +6,4 @@
 
 # Safe placeholder:
 requests>=2.32.0
+flask>=3.0.0

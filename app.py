@@ -56,3 +56,37 @@ def hash_password_safe(password: str) -> str:
     # ✅ use bcrypt or hashlib with sha256+salt in production
     salt = secrets.token_bytes(16)
     return hashlib.sha256(salt + password.encode()).hexdigest()
+
+
+# ── Flask routes — gives CodeQL real data-flow paths to trace ─────────────
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+
+@app.route("/user")
+def user():
+    # ❌ request.args (user input) flows directly into get_user() → SQL injection
+    username = request.args.get("username")
+    results = get_user(username)
+    return jsonify(results)
+
+
+@app.route("/ping")
+def ping():
+    # ❌ request.args (user input) flows directly into run_ping() → command injection
+    host = request.args.get("host")
+    output = run_ping(host)
+    return output
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    # ❌ user-supplied password hashed with MD5
+    password = request.form.get("password")
+    hashed = hash_password(password)
+    return jsonify({"hash": hashed})
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
