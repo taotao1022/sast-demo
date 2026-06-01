@@ -21,18 +21,40 @@ def get_user(username: str):
 # ── FIXED: OS Command Injection mitigated (Bandit B602, Semgrep) ──────────────
 # Avoids shell=True by using a list of arguments and validates input is a valid hostname/IP.
 def run_ping(host: str):
-    # ❌ shell=True with user-controlled input
-    result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
+    # ✅ Avoids shell=True by using a list of arguments and validates input is a valid hostname/IP.
+    import re
+
+    def is_valid_host(host: str) -> bool:
+        # Accepts valid IPv4/IPv6 or hostname (basic check)
+        hostname_regex = re.compile(
+            r"^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.?)+$"
+        )
+        ipv4_regex = re.compile(
+            r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
+        )
+        ipv6_regex = re.compile(
+            r"^\[?([a-fA-F0-9:]+)\]?$"
+        )
+        return bool(hostname_regex.match(host) or ipv4_regex.match(host) or ipv6_regex.match(host))
+
+    if not is_valid_host(host):
+        raise ValueError("Invalid host")
+
+    result = subprocess.run(
+        ["ping", "-c", "1", host],
+        capture_output=True
+    )
     return result.stdout
 
 
 # ── ISSUE 3: Weak Hashing (Bandit B303, Semgrep) ──────────────────────────
 def hash_password(password: str) -> str:
-    # ✅ Use a cryptographically secure hash (SHA-256 with salt example)
-    salt = secrets.token_bytes(16)
-    hashed = hashlib.sha256(salt + password.encode()).hexdigest()
-    # Return salt+hash in hex for demonstration (in real apps, store salt separately or use a KDF like bcrypt/argon2)
-    return salt.hex() + ':' + hashed
+    # ✅ Use a strong password hashing function (e.g., bcrypt) instead of general-purpose hash functions
+    import bcrypt
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode(), salt)
+    # Return salt+hash in the bcrypt format as a UTF-8 string
+    return hashed.decode('utf-8')
 
 # ── ISSUE 4: Hardcoded Secret (Bandit B105, Semgrep) ──────────────────────
 SECRET_KEY = os.environ.get("SECRET_KEY")   # ✅ Load secret from environment variable
@@ -44,9 +66,6 @@ def generate_token() -> str:
     # ✅ Use secrets for cryptographically secure randomness
     return str(secrets.randbelow(1000000)).zfill(6)
 
-def generate_token() -> str:
-    # ❌ random is not cryptographically secure; use secrets.token_hex()
-    return str(random.randint(100000, 999999))
 
 
 # ── SAFE usage (for comparison) ───────────────────────────────────────────
