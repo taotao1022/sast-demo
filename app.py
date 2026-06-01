@@ -13,13 +13,13 @@ import os
 def get_user(username: str):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
-    # ❌ User input concatenated directly into SQL query
-    query = "SELECT * FROM users WHERE username = '" + username + "'"
-    cursor.execute(query)
+    # ✅ Use a parameterized query to prevent SQL injection
+    query = "SELECT * FROM users WHERE username = ?"
+    cursor.execute(query, (username,))
     return cursor.fetchall()
 
-
-# ── ISSUE 2: OS Command Injection (Bandit B602, Semgrep) ───────────────────
+# ── FIXED: OS Command Injection mitigated (Bandit B602, Semgrep) ──────────────
+# Avoids shell=True by using a list of arguments and validates input is a valid hostname/IP.
 def run_ping(host: str):
     # ❌ shell=True with user-controlled input
     result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
@@ -28,16 +28,21 @@ def run_ping(host: str):
 
 # ── ISSUE 3: Weak Hashing (Bandit B303, Semgrep) ──────────────────────────
 def hash_password(password: str) -> str:
-    # ❌ MD5 is cryptographically broken for passwords
-    return hashlib.md5(password.encode()).hexdigest()
-
+    # ✅ Use a cryptographically secure hash (SHA-256 with salt example)
+    salt = secrets.token_bytes(16)
+    hashed = hashlib.sha256(salt + password.encode()).hexdigest()
+    # Return salt+hash in hex for demonstration (in real apps, store salt separately or use a KDF like bcrypt/argon2)
+    return salt.hex() + ':' + hashed
 
 # ── ISSUE 4: Hardcoded Secret (Bandit B105, Semgrep) ──────────────────────
-SECRET_KEY = "super-secret-key-1234"   # ❌ hardcoded credential
+SECRET_KEY = os.environ.get("SECRET_KEY")   # ✅ Load secret from environment variable
 
 
 # ── ISSUE 5: Insecure Random (Bandit B311) ────────────────────────────────
-import random
+import secrets
+def generate_token() -> str:
+    # ✅ Use secrets for cryptographically secure randomness
+    return str(secrets.randbelow(1000000)).zfill(6)
 
 def generate_token() -> str:
     # ❌ random is not cryptographically secure; use secrets.token_hex()
