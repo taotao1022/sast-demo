@@ -7,6 +7,8 @@ import subprocess
 import sqlite3
 import hashlib
 import os
+import ipaddress
+import re
 
 
 # ── ISSUE 1: SQL Injection (Bandit B608, Semgrep, CodeQL) ──────────────────
@@ -21,8 +23,29 @@ def get_user(username: str):
 # ── FIXED: OS Command Injection mitigated (Bandit B602, Semgrep) ──────────────
 # Avoids shell=True by using a list of arguments and validates input is a valid hostname/IP.
 def run_ping(host: str):
-    # ❌ shell=True with user-controlled input
-    result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
+    if not host:
+        raise ValueError("Host is required")
+
+    host = host.strip()
+
+    # Allow valid IP addresses
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        # Or allow conservative hostnames (RFC-style labels)
+        hostname_pattern = re.compile(
+            r"^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}$"
+        )
+        if not hostname_pattern.fullmatch(host):
+            raise ValueError("Invalid host")
+
+    result = subprocess.run(
+        ["ping", "-c", "1", host],
+        shell=False,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     return result.stdout
 
 
