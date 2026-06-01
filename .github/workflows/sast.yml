@@ -31,23 +31,22 @@ jobs:
       - name: Run Bandit
         run: bandit -r . --configfile .bandit --format json --output bandit-report.json || true
 
-      - name: Fail if high/medium severity findings exist
+      - name: Fail if MEDIUM or HIGH findings exist
         run: |
-          FINDINGS=$(python3 -c "
-          import json
-          with open('bandit-report.json') as f:
+          python3 - <<'EOF'
+          import json, sys
+          with open("bandit-report.json") as f:
               data = json.load(f)
-          issues = [i for i in data.get('results', []) if i['issue_severity'] in ('HIGH', 'MEDIUM')]
-          print(len(issues))
-          ")
-          echo "Bandit MEDIUM/HIGH findings: $FINDINGS"
-          if [ "$FINDINGS" -gt "0" ]; then
-            echo "❌ Bandit found $FINDINGS MEDIUM or HIGH severity issue(s)."
-            exit 1
-          fi
-          echo "✅ No MEDIUM/HIGH Bandit findings."
+          issues = [i for i in data.get("results", []) if i["issue_severity"] in ("HIGH", "MEDIUM")]
+          if issues:
+              for i in issues:
+                  print(f"[{i['issue_severity']}] {i['issue_text']} — {i['filename']}:{i['line_number']}")
+              print(f"\n❌ {len(issues)} MEDIUM/HIGH finding(s). Fix before merging.")
+              sys.exit(1)
+          print("✅ No MEDIUM/HIGH findings.")
+          EOF
 
-      - name: Upload Bandit JSON report as artifact
+      - name: Upload Bandit report
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -75,38 +74,30 @@ jobs:
       - name: Install Semgrep
         run: pip install semgrep
 
-      - name: Run Semgrep (Python security ruleset)
-        run: |
-          semgrep scan \
-            --config "p/python" \
-            --config "p/owasp-top-ten" \
-            --sarif \
-            --output semgrep.sarif || true
-        env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      - name: Run Semgrep
+        run: semgrep scan --config "p/python" --config "p/owasp-top-ten" --json --output semgrep-report.json || true
 
-      - name: Check for Semgrep findings and fail if found
+      - name: Fail if findings exist
         run: |
-          FINDINGS=$(python3 -c "
+          python3 - <<'EOF'
           import json, sys
-          with open('semgrep.sarif') as f:
+          with open("semgrep-report.json") as f:
               data = json.load(f)
-          results = data.get('runs', [{}])[0].get('results', [])
-          print(len(results))
-          ")
-          echo "Semgrep findings: $FINDINGS"
-          if [ "$FINDINGS" -gt "0" ]; then
-            echo "❌ Semgrep found $FINDINGS issue(s). Review findings before merging."
-            exit 1
-          fi
-          echo "✅ No Semgrep findings."
+          results = data.get("results", [])
+          if results:
+              for r in results:
+                  print(f"[{r['extra']['severity']}] {r['extra']['message']} — {r['path']}:{r['start']['line']}")
+              print(f"\n❌ {len(results)} Semgrep finding(s). Fix before merging.")
+              sys.exit(1)
+          print("✅ No Semgrep findings.")
+          EOF
 
-      - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v4
+      - name: Upload Semgrep report
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          sarif_file: semgrep.sarif
-          category: semgrep
+          name: semgrep-report
+          path: semgrep-report.json
 
   # ─────────────────────────────────────────────
   # 3. CodeQL — GitHub's deep semantic analysis
@@ -118,7 +109,6 @@ jobs:
       actions: read
       contents: read
       security-events: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -163,11 +153,7 @@ jobs:
         run: pip install pip-audit
 
       - name: Run pip-audit
-        run: |
-          pip-audit \
-            --requirement requirements.txt \
-            --format json \
-            --output pip-audit-report.json || true
+        run: pip-audit --requirement requirements.txt --format json --output pip-audit-report.json || true
 
       - name: Upload pip-audit report
         uses: actions/upload-artifact@v4
