@@ -26,20 +26,26 @@ jobs:
           python-version: "3.12"
 
       - name: Install Bandit
-        run: pip install bandit[toml] bandit-sarif-formatter
+        run: pip install bandit[toml]
 
-      - name: Run Bandit (JSON)
+      - name: Run Bandit
         run: bandit -r . --configfile .bandit --format json --output bandit-report.json || true
 
-      - name: Run Bandit (SARIF)
-        run: bandit -r . --configfile .bandit --format sarif --output bandit.sarif || true
-
-      - name: Upload Bandit SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: bandit.sarif
-          category: bandit
+      - name: Fail if high/medium severity findings exist
+        run: |
+          FINDINGS=$(python3 -c "
+          import json
+          with open('bandit-report.json') as f:
+              data = json.load(f)
+          issues = [i for i in data.get('results', []) if i['issue_severity'] in ('HIGH', 'MEDIUM')]
+          print(len(issues))
+          ")
+          echo "Bandit MEDIUM/HIGH findings: $FINDINGS"
+          if [ "$FINDINGS" -gt "0" ]; then
+            echo "❌ Bandit found $FINDINGS MEDIUM or HIGH severity issue(s)."
+            exit 1
+          fi
+          echo "✅ No MEDIUM/HIGH Bandit findings."
 
       - name: Upload Bandit JSON report as artifact
         uses: actions/upload-artifact@v4
