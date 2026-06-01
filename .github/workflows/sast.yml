@@ -26,12 +26,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install Bandit
-        run: pip install bandit[toml]
+        run: pip install bandit[toml] bandit-sarif-formatter
 
-      - name: Run Bandit
-        run: |
-          bandit -r . --configfile .bandit --format json --output bandit-report.json || true
-          bandit -r . --configfile .bandit --format sarif --output bandit.sarif || true
+      - name: Run Bandit (JSON)
+        run: bandit -r . --configfile .bandit --format json --output bandit-report.json || true
+
+      - name: Run Bandit (SARIF)
+        run: bandit -r . --configfile .bandit --format sarif --output bandit.sarif || true
 
       - name: Upload Bandit SARIF to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -57,10 +58,16 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    container:
-      image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install semgrep
 
       - name: Run Semgrep (Python security ruleset)
         run: |
@@ -68,10 +75,25 @@ jobs:
             --config "p/python" \
             --config "p/owasp-top-ten" \
             --sarif \
-            --output semgrep.sarif \
-            --error    # exit non-zero if findings exist
+            --output semgrep.sarif || true
         env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional; enables Semgrep Cloud dashboard
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Check for Semgrep findings and fail if found
+        run: |
+          FINDINGS=$(python3 -c "
+          import json, sys
+          with open('semgrep.sarif') as f:
+              data = json.load(f)
+          results = data.get('runs', [{}])[0].get('results', [])
+          print(len(results))
+          ")
+          echo "Semgrep findings: $FINDINGS"
+          if [ "$FINDINGS" -gt "0" ]; then
+            echo "❌ Semgrep found $FINDINGS issue(s). Review findings before merging."
+            exit 1
+          fi
+          echo "✅ No Semgrep findings."
 
       - name: Upload Semgrep SARIF
         uses: github/codeql-action/upload-sarif@v4
@@ -107,11 +129,6 @@ jobs:
         with:
           languages: python
           queries: security-extended
-          config: |
-            query-filters:
-              - include:
-                  kind: problem
-                  precision: medium+
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4
@@ -144,9 +161,7 @@ jobs:
           pip-audit \
             --requirement requirements.txt \
             --format json \
-            --output pip-audit-report.json \
-            --strict        # fail if any vulnerabilities found
-        continue-on-error: true   # capture report even on failure
+            --output pip-audit-report.json || true
 
       - name: Upload pip-audit report
         uses: actions/upload-artifact@v4
