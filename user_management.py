@@ -62,24 +62,46 @@ DB_NAME = "users"
 # ── Scenario 5: SQL Injection in Search ────────────────────────────────────
 @app.route("/search")
 def search_users():
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
+    from sqlalchemy import create_engine, Column, String
+    from sqlalchemy.ext.declarative import declarative_base
+    from sqlalchemy.orm import sessionmaker
+
+    # SQLAlchemy setup (typically move to global init in production)
+    engine = create_engine('sqlite:///users.db')
+    Base = declarative_base()
+
+    class User(Base):
+        __tablename__ = 'users'
+        username = Column(String, primary_key=True)
+        email = Column(String)
+
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
     query = request.args.get("q", "")
-    # ❌ SQL injection via search input
-    results = cursor.execute(
-        "SELECT username, email FROM users WHERE username LIKE '%" + query + "%'"
-    ).fetchall()
+    # Use ORM for parameterized, injection-safe LIKE filter
+    users = session.query(User).filter(User.username.like(f"%{query}%")).all()
+    results = [{"username": user.username, "email": user.email} for user in users]
     return jsonify(results)
 
 
 # ── Scenario 6: OS Command in Log Rotation ─────────────────────────────────
 @app.route("/admin/rotate-logs")
 def rotate_logs():
-    log_name = request.args.get("log", "app.log")
-    # ❌ Command injection: attacker can pass "app.log; rm -rf /"
-    os.system(f"mv /var/log/{log_name} /var/log/{log_name}.bak")
-    return jsonify({"status": "rotated"})
+    import os
+    import subprocess
 
+    log_name = request.args.get("log", "app.log")
+    # Prevent directory traversal by permitting only basename
+    log_name = os.path.basename(log_name)
+    src = f"/var/log/{log_name}"
+    dest = f"/var/log/{log_name}.bak"
+    try:
+        # Use subprocess to safely pass arguments as a list
+        subprocess.check_call(['mv', src, dest])
+    except subprocess.CalledProcessError:
+        return jsonify({"error": "Log rotation failed"}), 500
+    return jsonify({"status": "rotated"})
 
 if __name__ == "__main__":
     app.run(debug=True)   # ❌ debug=True left on
