@@ -1,23 +1,19 @@
 """
-User management module — added by junior developer.
-Contains several real-world security mistakes.
+User management module — all security issues fixed.
 """
 
 import os
-import pickle
 import sqlite3
 import subprocess
-import xml.etree.ElementTree as ET
 from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
 
 
-# ── Scenario 1: Path Traversal ─────────────────────────────────────────────
+# ── FIX 1: Path Traversal ──────────────────────────────────────────────────
 @app.route("/download")
 def download_file():
-    filename = request.args.get("filename")
-    # Prevent path traversal by resolving the full path and ensuring it stays within the reports directory
+    filename = request.args.get("filename", "")
     reports_dir = os.path.abspath("/app/reports")
     if not filename or "/" in filename or "\\" in filename:
         return jsonify({"error": "Invalid filename"}), 400
@@ -29,24 +25,19 @@ def download_file():
     return send_file(filepath)
 
 
-# ── Scenario 2: Insecure Deserialization ───────────────────────────────────
+# ── FIX 2: Insecure Deserialization ───────────────────────────────────────
 @app.route("/load-session", methods=["POST"])
 def load_session():
-   session_data = request.get_json()
-return jsonify({"user": session_data})
-    import json
-    try:
-        user = json.loads(session_data)
-    except Exception as e:
-        return jsonify({"error": "Invalid session data"}), 400
-    return jsonify({"user": str(user)})
+    # ✅ JSON cannot execute code — safe replacement for pickle
+    session_data = request.get_json()
+    return jsonify({"user": session_data})
 
 
-# ── Scenario 3: XML External Entity (XXE) ─────────────────────────────────
+# ── FIX 3: XXE ────────────────────────────────────────────────────────────
 @app.route("/import-users", methods=["POST"])
 def import_users():
     xml_data = request.get_data()
-    # ✅ Use defusedxml to safely parse XML and prevent XXE attacks
+    # ✅ defusedxml disables external entity processing
     try:
         import defusedxml.ElementTree as SafeET
     except ImportError:
@@ -55,62 +46,53 @@ def import_users():
         tree = SafeET.fromstring(xml_data)
         users = [child.text for child in tree]
         return jsonify({"imported": users})
-    except Exception as e:
+    except Exception:
         return jsonify({"error": "Invalid XML data"}), 400
 
 
-# ── Scenario 4: Hardcoded Database Credentials ─────────────────────────────
-DB_HOST = "prod-db.internal"
-DB_USER = "admin"
-DB_PASS = "Pr0d@dm1n2024!"   # ❌ hardcoded production password
-DB_NAME = "users"
+# ── FIX 4: Hardcoded Credentials ──────────────────────────────────────────
+# ✅ All credentials read from environment variables
+DB_HOST = os.environ.get("DB_HOST", "")
+DB_USER = os.environ.get("DB_USER", "")
+DB_PASS = os.environ.get("DB_PASS", "")
+DB_NAME = os.environ.get("DB_NAME", "")
 
 
-# ── Scenario 5: SQL Injection in Search ────────────────────────────────────
+# ── FIX 5: SQL Injection in Search ────────────────────────────────────────
 @app.route("/search")
 def search_users():
-    from sqlalchemy import create_engine, Column, String
-    from sqlalchemy.ext.declarative import declarative_base
-    from sqlalchemy.orm import sessionmaker
-
-    # SQLAlchemy setup (typically move to global init in production)
-    engine = create_engine('sqlite:///users.db')
-    Base = declarative_base()
-
-    class User(Base):
-        __tablename__ = 'users'
-        username = Column(String, primary_key=True)
-        email = Column(String)
-
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
     query = request.args.get("q", "")
-    # Use ORM for parameterized, injection-safe LIKE filter
-    users = session.query(User).filter(User.username.like(f"%{query}%")).all()
-    results = [{"username": user.username, "email": user.email} for user in users]
+    # ✅ Parameterized LIKE query
+    results = cursor.execute(
+        "SELECT username, email FROM users WHERE username LIKE ?",
+        (f"%{query}%",)
+    ).fetchall()
     return jsonify(results)
 
 
-# ── Scenario 6: OS Command in Log Rotation ─────────────────────────────────
+# ── FIX 6: Command Injection in Log Rotation ──────────────────────────────
 @app.route("/admin/rotate-logs")
 def rotate_logs():
-    import os
-    import subprocess
-
+    import shutil
     log_name = request.args.get("log", "app.log")
-    # Prevent directory traversal by permitting only basename
+    # ✅ Validate filename, use shutil instead of shell command
     log_name = os.path.basename(log_name)
-    src = f"/var/log/{log_name}"
-    dest = f"/var/log/{log_name}.bak"
+    allowed_logs = {
+        "app.log": ("/var/log/app.log", "/var/log/app.log.bak")
+    }
+    if not log_name.endswith(".log") or log_name not in allowed_logs:
+        return jsonify({"error": "Invalid log name"}), 400
+    src, dst = allowed_logs[log_name]
     try:
-        # Use subprocess to safely pass arguments as a list
-        subprocess.check_call(['mv', src, dest])
-    except subprocess.CalledProcessError:
+        shutil.move(src, dst)
+    except Exception:
         return jsonify({"error": "Log rotation failed"}), 500
     return jsonify({"status": "rotated"})
 
+
 if __name__ == "__main__":
-    import os
-    debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
+    # ✅ debug mode controlled by environment variable
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     app.run(debug=debug_mode)
