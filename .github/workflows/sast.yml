@@ -25,6 +25,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-bandit-${{ hashFiles('requirements.txt') }}
+
       - name: Install Bandit
         run: pip install bandit[toml]
 
@@ -163,11 +169,27 @@ jobs:
           path: pip-audit-report.json
 
   # ─────────────────────────────────────────────
-  # 5. Summary gate — blocks merge if SAST fails
+  # 5. Gitleaks — secrets scanning
+  # ─────────────────────────────────────────────
+  gitleaks:
+    name: Gitleaks (Secrets Scanning)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so Gitleaks can scan all commits
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────
+  # 6. Summary gate — blocks merge if SAST fails
   # ─────────────────────────────────────────────
   sast-gate:
     name: SAST Gate (must pass to merge)
-    needs: [bandit, semgrep, codeql, pip-audit]
+    needs: [bandit, semgrep, codeql, pip-audit, gitleaks]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -176,7 +198,8 @@ jobs:
           if [[ "${{ needs.bandit.result }}"    != "success" || \
                 "${{ needs.semgrep.result }}"   != "success" || \
                 "${{ needs.codeql.result }}"    != "success" || \
-                "${{ needs.pip-audit.result }}" != "success" ]]; then
+                "${{ needs.pip-audit.result }}" != "success" || \
+                "${{ needs.gitleaks.result }}"  != "success" ]]; then
             echo "❌ One or more SAST checks failed. Review findings before merging."
             exit 1
           fi
