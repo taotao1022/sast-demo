@@ -16,9 +16,8 @@ from flask import Flask, request, jsonify
 def get_user(username: str):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
-    # ❌ User input concatenated directly into SQL query
-    query = "SELECT * FROM users WHERE username = '" + username + "'"
-    cursor.execute(query)
+    # ✅ Parameterized query
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
     return cursor.fetchall()
 
 
