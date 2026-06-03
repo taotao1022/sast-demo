@@ -85,5 +85,11 @@ def login():
     return jsonify({"hash": hashed})
 
 
+def execute_query(query: str):
+    conn = sqlite3.connect("users.db")
+    # ❌ SQL injection — for gate demo
+    conn.execute(query)
+
+
 if __name__ == "__main__":
     app.run(debug=True)
