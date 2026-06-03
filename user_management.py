@@ -17,8 +17,15 @@ app = Flask(__name__)
 @app.route("/download")
 def download_file():
     filename = request.args.get("filename")
-    # ❌ Path traversal: attacker can pass "../../etc/passwd"
-    filepath = os.path.join("/app/reports", filename)
+    # Prevent path traversal by resolving the full path and ensuring it stays within the reports directory
+    reports_dir = os.path.abspath("/app/reports")
+    if not filename or "/" in filename or "\\" in filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    filepath = os.path.abspath(os.path.join(reports_dir, filename))
+    if not filepath.startswith(reports_dir + os.sep):
+        return jsonify({"error": "Invalid file path"}), 400
+    if not os.path.exists(filepath):
+        return jsonify({"error": "File not found"}), 404
     return send_file(filepath)
 
 
