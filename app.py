@@ -5,10 +5,10 @@ so you can see SAST tools catch them in the pipeline.
 
 import subprocess
 import sqlite3
-import hashlib
 import random
 import secrets
 import os
+import bcrypt
 from flask import Flask, request, jsonify
 
 
@@ -16,23 +16,27 @@ from flask import Flask, request, jsonify
 def get_user(username: str):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
-    # ❌ User input concatenated directly into SQL query
-    query = "SELECT * FROM users WHERE username = '" + username + "'"
-    cursor.execute(query)
+    # ✅ Parameterized query
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
     return cursor.fetchall()
 
 
 # ── ISSUE 2: OS Command Injection ──────────────────────────────────────────
 def run_ping(host: str):
-    # ❌ shell=True with user-controlled input
-    result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
+    # ✅ No shell=True, args passed as a list
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return b"Invalid host"
+    result = subprocess.run(["ping", "-c", "1", host], capture_output=True)
     return result.stdout
 
 
 # ── ISSUE 3: Weak Hashing ──────────────────────────────────────────────────
 def hash_password(password: str) -> str:
-    # ❌ MD5 is cryptographically broken for passwords
-    return hashlib.md5(password.encode()).hexdigest()
+    # ✅ bcrypt is slow by design — resistant to brute-force attacks
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 # ── ISSUE 4: Hardcoded Secret ──────────────────────────────────────────────
@@ -85,5 +89,13 @@ def login():
     return jsonify({"hash": hashed})
 
 
+def execute_query(query: str):
+    conn = sqlite3.connect("users.db")
+    # ❌ SQL injection — for gate demo
+    conn.execute(query)
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    # ✅ Controlled by environment variable, defaults to False
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    app.run(debug=debug_mode)
