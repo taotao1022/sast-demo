@@ -1,83 +1,89 @@
 """
-Demo Python app — security issues fixed.
+Demo Python app — intentionally contains security issues
+so you can see SAST tools catch them in the pipeline.
 """
 
+import subprocess
 import sqlite3
 import hashlib
+import random
 import secrets
 import os
 from flask import Flask, request, jsonify
 
 
-# ── FIX 1: SQL Injection → parameterized query ─────────────────────────────
+# ── ISSUE 1: SQL Injection ─────────────────────────────────────────────────
 def get_user(username: str):
     conn = sqlite3.connect("users.db")
     cursor = conn.cursor()
-    # ✅ Parameterized query — user input never touches the SQL string
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    # ❌ User input concatenated directly into SQL query
+    query = "SELECT * FROM users WHERE username = '" + username + "'"
+    cursor.execute(query)
     return cursor.fetchall()
 
 
-# ── FIX 2: Command Injection → no shell=True, validated input ──────────────
+# ── ISSUE 2: OS Command Injection ──────────────────────────────────────────
 def run_ping(host: str):
-    import ipaddress
-    import subprocess
-    # ✅ Validate host is a real IP before passing to subprocess
-    # ✅ shell=False (default), arguments passed as a list
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return b"Invalid host"
-    result = subprocess.run(["ping", "-c", "1", host], capture_output=True)
+    # ❌ shell=True with user-controlled input
+    result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
     return result.stdout
 
 
-# ── FIX 3: Weak Hashing → SHA-256 with salt ────────────────────────────────
+# ── ISSUE 3: Weak Hashing ──────────────────────────────────────────────────
 def hash_password(password: str) -> str:
-    # ✅ SHA-256 with a random salt (use bcrypt/argon2 in production)
+    # ❌ MD5 is cryptographically broken for passwords
+    return hashlib.md5(password.encode()).hexdigest()
+
+
+# ── ISSUE 4: Hardcoded Secret ──────────────────────────────────────────────
+SECRET_KEY = "super-secret-key-1234"  # ❌ hardcoded credential
+
+
+# ── ISSUE 5: Insecure Random ───────────────────────────────────────────────
+def generate_token() -> str:
+    # ❌ random is not cryptographically secure
+    return str(random.randint(100000, 999999))
+
+
+# ── SAFE usage (for comparison) ───────────────────────────────────────────
+def generate_secure_token() -> str:
+    # ✅ secrets module is cryptographically secure
+    return secrets.token_hex(16)
+
+
+def hash_password_safe(password: str) -> str:
+    # ✅ SHA-256 with salt
     salt = secrets.token_bytes(16)
     return hashlib.sha256(salt + password.encode()).hexdigest()
 
 
-# ── FIX 4: Hardcoded Secret → environment variable ─────────────────────────
-# ✅ Read secret from environment — set it with: export SECRET_KEY=your-secret
-SECRET_KEY = os.environ.get("SECRET_KEY", "")
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY environment variable is not set")
-
-
-# ── FIX 5: Insecure Random → secrets module ────────────────────────────────
-def generate_token() -> str:
-    # ✅ secrets.token_hex is cryptographically secure
-    return secrets.token_hex(16)
-
-
-# ── Flask routes ───────────────────────────────────────────────────────────
+# ── Flask routes — gives CodeQL real data-flow paths to trace ─────────────
 app = Flask(__name__)
 
 
 @app.route("/user")
 def user():
-    username = request.args.get("username", "")
+    # ❌ user input flows into SQL query
+    username = request.args.get("username")
     results = get_user(username)
     return jsonify(results)
 
 
 @app.route("/ping")
 def ping():
-    host = request.args.get("host", "")
+    # ❌ user input flows into shell command
+    host = request.args.get("host")
     output = run_ping(host)
     return output
 
 
 @app.route("/login", methods=["POST"])
 def login():
-    password = request.form.get("password", "")
+    # ❌ password hashed with MD5
+    password = request.form.get("password")
     hashed = hash_password(password)
     return jsonify({"hash": hashed})
 
 
 if __name__ == "__main__":
-    # ✅ debug=False in production — use an env var to control this
-    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    app.run(debug=debug_mode)
+    app.run(debug=True)
