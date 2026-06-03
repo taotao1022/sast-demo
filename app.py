@@ -23,15 +23,21 @@ def get_user(username: str):
 
 # ── ISSUE 2: OS Command Injection ──────────────────────────────────────────
 def run_ping(host: str):
-    # ❌ shell=True with user-controlled input
-    result = subprocess.run(f"ping -c 1 {host}", shell=True, capture_output=True)
+    # ✅ No shell=True, args passed as a list
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return b"Invalid host"
+    result = subprocess.run(["ping", "-c", "1", host], capture_output=True)
     return result.stdout
 
 
 # ── ISSUE 3: Weak Hashing ──────────────────────────────────────────────────
 def hash_password(password: str) -> str:
-    # ❌ MD5 is cryptographically broken for passwords
-    return hashlib.md5(password.encode()).hexdigest()
+    # ✅ SHA-256 with random salt
+    salt = secrets.token_bytes(16)
+    return hashlib.sha256(salt + password.encode()).hexdigest()
 
 
 # ── ISSUE 4: Hardcoded Secret ──────────────────────────────────────────────
@@ -91,4 +97,6 @@ def execute_query(query: str):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # ✅ Controlled by environment variable, defaults to False
+    debug_mode = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    app.run(debug=debug_mode)
