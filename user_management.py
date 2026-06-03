@@ -79,7 +79,8 @@ def rotate_logs():
     log_name = request.args.get("log", "app.log")
     # ✅ Validate filename, use shutil instead of shell command
     log_name = os.path.basename(log_name)
-    if not log_name.endswith(".log"):
+    allowed_logs = {"app.log"}
+    if not log_name.endswith(".log") or log_name not in allowed_logs:
         return jsonify({"error": "Invalid log name"}), 400
     src = f"/var/log/{log_name}"
     dst = f"/var/log/{log_name}.bak"
