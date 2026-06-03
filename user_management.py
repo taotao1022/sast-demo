@@ -25,9 +25,13 @@ def download_file():
 # ── Scenario 2: Insecure Deserialization ───────────────────────────────────
 @app.route("/load-session", methods=["POST"])
 def load_session():
-    session_data = request.get_data()
-    # ❌ Deserializing user-supplied data with pickle — remote code execution
-    user = pickle.loads(session_data)
+   session_data = request.get_json()
+return jsonify({"user": session_data})
+    import json
+    try:
+        user = json.loads(session_data)
+    except Exception as e:
+        return jsonify({"error": "Invalid session data"}), 400
     return jsonify({"user": str(user)})
 
 
@@ -35,10 +39,17 @@ def load_session():
 @app.route("/import-users", methods=["POST"])
 def import_users():
     xml_data = request.get_data()
-    # ❌ XXE: attacker can read local files via XML external entities
-    tree = ET.fromstring(xml_data)
-    users = [child.text for child in tree]
-    return jsonify({"imported": users})
+    # ✅ Use defusedxml to safely parse XML and prevent XXE attacks
+    try:
+        import defusedxml.ElementTree as SafeET
+    except ImportError:
+        return jsonify({"error": "Safe XML parser not available"}), 500
+    try:
+        tree = SafeET.fromstring(xml_data)
+        users = [child.text for child in tree]
+        return jsonify({"imported": users})
+    except Exception as e:
+        return jsonify({"error": "Invalid XML data"}), 400
 
 
 # ── Scenario 4: Hardcoded Database Credentials ─────────────────────────────
