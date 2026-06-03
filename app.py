@@ -5,10 +5,10 @@ so you can see SAST tools catch them in the pipeline.
 
 import subprocess
 import sqlite3
-import hashlib
 import random
 import secrets
 import os
+import bcrypt
 from flask import Flask, request, jsonify
 
 
@@ -35,9 +35,8 @@ def run_ping(host: str):
 
 # ── ISSUE 3: Weak Hashing ──────────────────────────────────────────────────
 def hash_password(password: str) -> str:
-    # ✅ SHA-256 with random salt
-    salt = secrets.token_bytes(16)
-    return hashlib.sha256(salt + password.encode()).hexdigest()
+    # ✅ bcrypt is slow by design — resistant to brute-force attacks
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 # ── ISSUE 4: Hardcoded Secret ──────────────────────────────────────────────
